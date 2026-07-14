@@ -1,0 +1,16 @@
+# Build-Ausgaben (alle Module)
+**/build/
+.gradle/
+.kotlin/
+
+# IDE
+.idea/
+*.iml
+.DS_Store
+
+# Lokale SDK-Pfade / Maschinen-spezifisch
+local.properties
+
+# Signing (falls später hinzugefügt — nie committen)
+*.jks
+*.keystore
