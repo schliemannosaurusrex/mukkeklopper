@@ -22,5 +22,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "KaniAmp"
+rootProject.name = "MukkeKlopper"
 include(":app")

@@ -1,10 +1,10 @@
-# KaniAmp — Implementierungsplan
+# MukkeKlopper — Implementierungsplan
 
 ## Kontext
 
-KaniAmp ist ein datenschutzorientierter Audio-Player mit SSH-basiertem Datei-Sync von einem privaten Heimserver (`<sync-host>`). Musikdateien werden auf das Gerät gezogen und lokal abgespielt. Sync ist netzwerkgegated: nur im Heimnetz oder per WireGuard-VPN. Zwei Clients: Android (Kotlin/Media3) und Linux (Python).
+MukkeKlopper ist ein datenschutzorientierter Audio-Player mit SSH-basiertem Datei-Sync von einem privaten Heimserver (`<sync-host>`). Musikdateien werden auf das Gerät gezogen und lokal abgespielt. Sync ist netzwerkgegated: nur im Heimnetz oder per WireGuard-VPN. Zwei Clients: Android (Kotlin/Media3) und Linux (Python).
 
-- **App-ID:** `de.schliemannosaurusrex.kaniamp`
+- **App-ID:** `de.schliemannosaurusrex.mukkeklopper`
 - **Publisher:** SchliemannosaurusRex
 
 ---
@@ -12,16 +12,16 @@ KaniAmp ist ein datenschutzorientierter Audio-Player mit SSH-basiertem Datei-Syn
 ## Projektstruktur
 
 ```
-workspace/kaniamp/
+workspace/mukkeklopper/
 ├── android/
-│   └── app/src/main/java/de/schliemannosaurusrex/kaniamp/
+│   └── app/src/main/java/de/schliemannosaurusrex/mukkeklopper/
 │       ├── player/       # Media3 ExoPlayer + MediaSessionService
 │       ├── sync/         # SSH/SFTP Sync-Engine
 │       ├── network/      # NetworkGatekeeper
 │       ├── ui/           # Activities, Fragments
 │       └── settings/     # PreferenceFragmentCompat
 ├── linux/
-│   └── kaniamp/
+│   └── mukkeklopper/
 │       ├── player.py     # mpv/vlc subprocess wrapper
 │       ├── sync.py       # paramiko SFTP
 │       └── network.py    # socket + wg + nmcli
@@ -52,14 +52,14 @@ FOREGROUND_SERVICE_DATA_SYNC
 ```
 
 **Foreground Services:**
-- `KaniPlayerService : MediaSessionService` — serviceType: `mediaPlayback`
-- `KaniSyncService : Service` — serviceType: `dataSync`
+- `MukkePlayerService : MediaSessionService` — serviceType: `mediaPlayback`
+- `MukkeSyncService : Service` — serviceType: `dataSync`
 
 ---
 
 ## Phase 2 — Audio-Player-Kern (Media3)
 
-`KaniPlayerService`:
+`MukkePlayerService`:
 - `ExoPlayer` + `MediaSession` — Playback-Controller für UI und Notification
 - `MediaStyleNotification` mit Playback-Controls (Play/Pause/Skip)
 - Playlist aus lokalem Storage (app-spezifisches externes Verzeichnis)
@@ -126,22 +126,22 @@ canSync() → SyncDecision {ALLOWED, BLOCKED, MITM_WARNING}
 | `auth_secret` | String (AES-GCM-verschlüsselt) | — |
 | `remote_base_path` | String | — |
 
-**Sync-Ziel: `Music/KaniAmp/<Server-Struktur>`** (öffentlich, via MediaStore-Insert):
+**Sync-Ziel: `Music/MukkeKlopper/<Server-Struktur>`** (öffentlich, via MediaStore-Insert):
 - Server-Ordnerstruktur wird 1:1 gespiegelt → Grundlage der Ordner-Library (Phase 8)
 - MediaStore indexiert automatisch → gesyncte Titel erscheinen sofort in der Library
-- KaniAmp ist Datei-Owner → lokales Verschieben später ohne System-Dialog
+- MukkeKlopper ist Datei-Owner → lokales Verschieben später ohne System-Dialog
 
 **Sync-Ablauf:**
 1. `NetworkGatekeeper.canSync()` — Blocked → UI-Banner + WireGuard-Intent (`com.wireguard.android`)
 2. Connect + Auth
 3. Remote-Inventur: rekursives SFTP-Listing von `remote_base_path` (Pfad, Größe, mtime)
-4. Lokale Inventur: MediaStore-Bestand unter `Music/KaniAmp/`
+4. Lokale Inventur: MediaStore-Bestand unter `Music/MukkeKlopper/`
 5. Delta: nur neue/geänderte Dateien laden (`IS_PENDING` während des Downloads)
 6. Löschungen: server-seitig entfernte Dateien werden aufgelistet, lokales Löschen
    erst nach Bestätigung durch den User — **pro Sync-Lauf nachfragen**
 7. Progress: `StateFlow<SyncState>` → UI beobachtet
 
-`KaniSyncService` (WorkManager-Integration):
+`MukkeSyncService` (WorkManager-Integration):
 - Manuell: UI-Button → sofortiger Start
 - Scheduler: `PeriodicWorkRequest` (Constraint: `CONNECTED`)
 
@@ -219,7 +219,7 @@ Zweck: Setup auf ein neues Gerät übertragen und ein Backup der Einstellungen h
 **ohne** Secrets im Klartext preiszugeben.
 
 **Format** (JSON, `kotlinx.serialization`, `application/json`, Dateiname
-`kaniamp-config-<yyyyMMdd>.json`):
+`mukkeklopper-config-<yyyyMMdd>.json`):
 
 ```jsonc
 {
@@ -228,7 +228,7 @@ Zweck: Setup auf ein neues Gerät übertragen und ein Backup der Einstellungen h
               "remoteBasePath": "…", "pinnedHostKey": "64:c6:…" },
   "network": { "requireVpnOutsideHome": true,
                "syncModeBEnabled": false, "homeSsids": [] },
-  "library": { "libraryRoot": "Music/KaniAmp/…", "viewMode": "FOLDERS" },
+  "library": { "libraryRoot": "Music/MukkeKlopper/…", "viewMode": "FOLDERS" },
   "sync": { "autoSyncEnabled": false },
   "secrets": null   // siehe unten
 }
@@ -271,14 +271,14 @@ Umsetzungsreihenfolge: nach Phase 4, vor Phase 9.
 - Navigation wie Dateimanager: Ordner + Titel gemischt, hoch/runter navigieren
 - **Verschieben** (rein lokal, kein Rück-Sync zum Server):
   - Long-Press → Mehrfachauswahl → „Verschieben nach…" → Zielordner wählen
-  - eigene (von KaniAmp gesyncte) Dateien: direktes MediaStore-Update von `RELATIVE_PATH`
+  - eigene (von MukkeKlopper gesyncte) Dateien: direktes MediaStore-Update von `RELATIVE_PATH`
   - fremde Dateien: `MediaStore.createWriteRequest()` → System-Bestätigungsdialog pro Batch
   - Namenskollision im Ziel: Abbruch mit Meldung, kein Überschreiben
 
 ## Phase 9 — Equalizer
 
 - `android.media.audiofx.Equalizer` an die `audioSessionId` des ExoPlayers
-  (im `KaniPlayerService`, Anwendung beim Service-Start)
+  (im `MukkePlayerService`, Anwendung beim Service-Start)
 - System-Presets + manuelle Band-Regler (gerätabhängig, i. d. R. 5 Bänder)
 - Zusätzlich: BassBoost + Virtualizer
 - Persistenz in DataStore
@@ -301,7 +301,7 @@ subprocess.run(['nmcli', '-t', '-f', 'active,ssid', 'dev', 'wifi'])
 
 `sync.py` (paramiko):
 - `RejectPolicy` — kein automatisches Key-Akzeptieren
-- Gepinnter Key in `~/.config/kaniamp/known_hosts`
+- Gepinnter Key in `~/.config/mukkeklopper/known_hosts`
 - TOFU: leere known_hosts → Key speichern; Abweichung → Abbruch + Meldung
 - Delta-Sync: SFTP `listdir_attr` vs. lokale Dateien
 
@@ -324,7 +324,7 @@ sign:
   script: |
     echo "$KEYSTORE_B64" | base64 -d > keystore.jks
     jarsigner -keystore keystore.jks -storepass "$KEYSTORE_PASS" \
-      android/app/build/outputs/bundle/release/app-release.aab kaniamp
+      android/app/build/outputs/bundle/release/app-release.aab mukkeklopper
   variables:
     KEYSTORE_B64: $BITWARDEN_KEYSTORE   # Bitwarden Secrets Manager
 
@@ -342,8 +342,8 @@ Promote: internal → closed (12 Tester, 14 Tage) → production (manuell)
 
 | Domain | Zweck | Priorität |
 |--------|-------|-----------|
-| `schliemannosaurusrex.de` | Basis des App-IDs `de.schliemannosaurusrex.kaniamp` — Pflicht vor erstem AAB-Upload | **Kritisch** |
-| `kaniamp.app` oder `kaniamp.com` | Projektseite + Datenschutzerklärung-URL (Play Store verlangt erreichbare URL) | Pflicht vor Store-Listing |
+| `schliemannosaurusrex.de` | Basis des App-IDs `de.schliemannosaurusrex.mukkeklopper` — Pflicht vor erstem AAB-Upload | **Kritisch** |
+| `mukkeklopper.app` oder `mukkeklopper.com` | Projektseite + Datenschutzerklärung-URL (Play Store verlangt erreichbare URL) | Pflicht vor Store-Listing |
 
 ### Google Play Console
 
@@ -353,8 +353,8 @@ Unter [play.google.com/console](https://play.google.com/console):
 
 1. **Developer-Konto anlegen** — 25 $ einmalig, Zahlungsmethode hinterlegen
 2. **App erstellen**
-   - App-Name: `KaniAmp`
-   - App-ID: `de.schliemannosaurusrex.kaniamp` ← unveränderlich nach erstem Upload
+   - App-Name: `MukkeKlopper`
+   - App-ID: `de.schliemannosaurusrex.mukkeklopper` ← unveränderlich nach erstem Upload
    - Sprache, Land, kostenlos
 3. **Play App Signing aktivieren** — Google verwaltet Release-Key, Upload erfolgt mit eigenem Upload-Key (Pflicht für AAB)
 4. **Data Safety Formular ausfüllen**
@@ -367,15 +367,15 @@ Unter [play.google.com/console](https://play.google.com/console):
    - Feature Graphic: 1024×500 px
    - Screenshots: mind. 2
    - Kurz- und Langbeschreibung
-   - Datenschutz-URL: z. B. `https://kaniamp.app/privacy`
+   - Datenschutz-URL: z. B. `https://mukkeklopper.app/privacy`
 7. **Closed Testing Track** — 12 Tester einladen, 14 Tage laufen lassen → dann Production freischaltbar
 
 ### Upload-Key (Keystore)
 
 ```bash
 keytool -genkeypair -v \
-  -keystore kaniamp-upload.jks \
-  -alias kaniamp \
+  -keystore mukkeklopper-upload.jks \
+  -alias mukkeklopper \
   -keyalg RSA -keysize 2048 \
   -validity 10000
 ```
@@ -385,11 +385,11 @@ Keystore-Datei und Passwort in **Bitwarden** ablegen (nicht ins Git-Repo).
 ### Empfohlene Reihenfolge
 
 - [ ] `schliemannosaurusrex.de` registrieren
-- [ ] `kaniamp.app` (oder `.com`) registrieren
+- [ ] `mukkeklopper.app` (oder `.com`) registrieren
 - [ ] Play Console Developer-Konto anlegen ($25)
 - [ ] Datenschutzseite aufsetzen (einfaches HTML genügt)
 - [ ] Upload-Keystore generieren + in Bitwarden ablegen
-- [ ] Trademark-Check: DPMA / USPTO für "KaniAmp"
+- [ ] Trademark-Check: DPMA / USPTO für "MukkeKlopper"
 - [ ] 12 Tester für Closed Testing organisieren
 
 ---
@@ -403,6 +403,6 @@ Keystore-Datei und Passwort in **Bitwarden** ablegen (nicht ins Git-Repo).
 4. Modus B aktivieren → Prominent Disclosure → Location-Permission-Request erscheint
 
 **Linux:**
-1. `python -m kaniamp sync --dry-run` → Delta-Liste ohne Download
+1. `python -m mukkeklopper sync --dry-run` → Delta-Liste ohne Download
 2. `wg show` via Mock-Env → VPN-Logik greift korrekt
 3. paramiko mit unbekanntem Key → `RejectPolicy` bricht ab, Fehlermeldung erscheint

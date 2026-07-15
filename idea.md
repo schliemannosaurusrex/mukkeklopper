@@ -1,6 +1,6 @@
 # Konzept-Addendum: Netzwerk-Logik & Play-Store-Veröffentlichung
 
-**App-ID:** `de.schliemannosaurusrex.kaniamp` · **Publisher:** SchliemannosaurusRex
+**App-ID:** `de.schliemannosaurusrex.mukkeklopper` · **Publisher:** SchliemannosaurusRex
 
 ---
 
@@ -70,7 +70,7 @@ Konfiguration (Settings → Sync):
 
 | Punkt | Anforderung |
 |---|---|
-| App-ID | `de.schliemannosaurusrex.kaniamp` — **unveränderlich nach erstem Upload**; Domain schliemannosaurusrex.de vor Upload registrieren |
+| App-ID | `de.schliemannosaurusrex.mukkeklopper` — **unveränderlich nach erstem Upload**; Domain schliemannosaurusrex.de vor Upload registrieren |
 | Format | AAB (App Bundle), Play App Signing verpflichtend |
 | Target SDK | jährliche Pflicht-Anhebung (Play-Policy); spricht für Kotlin/Media3 statt Kivy |
 | Android 17 | `ACCESS_LOCAL_NETWORK` als Runtime-Permission deklarieren (LAN-Sync zu &lt;sync-host&gt;) |
