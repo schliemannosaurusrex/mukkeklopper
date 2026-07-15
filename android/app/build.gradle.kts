@@ -1,9 +1,23 @@
+import java.util.Properties
+
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.kotlin.serialization)
 }
+
+// Lokaler, selbstsignierter Test-Keystore fuer installierbare Release-Builds auf
+// diesem Entwicklungsrechner (siehe local.properties). NICHT der Play-Store-
+// Upload-Keystore -- der ist ein separater, noch offener Schritt (STATUS.md).
+// Fehlt local.properties oder einer der Keys (z. B. auf einem anderen Rechner
+// oder in CI), bleibt der Release-Build unsigniert statt zu brechen.
+val localProperties = Properties().apply {
+    val file = rootProject.file("local.properties")
+    if (file.exists()) file.inputStream().use { load(it) }
+}
+val testKeystorePath = localProperties.getProperty("mukkeklopper.testKeystore.path")
+val testKeystoreFile = testKeystorePath?.let { rootProject.file(it) }?.takeIf { it.exists() }
 
 android {
     namespace = "de.schliemannosaurusrex.mukkeklopper"
@@ -18,6 +32,17 @@ android {
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
 
+    signingConfigs {
+        if (testKeystoreFile != null) {
+            create("testRelease") {
+                storeFile = testKeystoreFile
+                storePassword = localProperties.getProperty("mukkeklopper.testKeystore.storePassword")
+                keyAlias = localProperties.getProperty("mukkeklopper.testKeystore.keyAlias")
+                keyPassword = localProperties.getProperty("mukkeklopper.testKeystore.keyPassword")
+            }
+        }
+    }
+
     buildTypes {
         release {
             isMinifyEnabled = true
@@ -25,6 +50,9 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
+            if (testKeystoreFile != null) {
+                signingConfig = signingConfigs.getByName("testRelease")
+            }
         }
     }
 
