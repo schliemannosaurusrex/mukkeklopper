@@ -109,8 +109,12 @@ build (gradle bundleRelease)
 ## 3. Offene Punkte
 
 - [x] Publisher-Name festgelegt: SchliemannosaurusRex
-- [ ] Domain schliemannosaurusrex.de registrieren (vor erstem AAB-Upload) — *übernimmt Owner*
-- [ ] Projektseite aufsetzen (Store-Listing-Link, Datenschutzerklärung-Hosting) — *übernimmt Owner*
+- [x] Domain schliemannosaurusrex.de registriert
+- [ ] Projektseite unter `web/` aufsetzen (Store-Listing-Link,
+      Datenschutzerklärung-Hosting) — *in Arbeit, übernimmt Owner*
 - [x] Namenskollisions-Check: keine Konflikte (Name einzigartig)
 - [ ] 12 Tester für Closed Testing organisieren
+
+Ausführliche Checkliste inkl. Data-Safety-Entwurf:
+[`docs/play-store-checklist.md`](docs/play-store-checklist.md).
 - [x] Entscheidung: **SSID-Modus B kommt in v1** (Opt-in, Modus A bleibt Default)

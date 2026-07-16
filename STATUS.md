@@ -419,10 +419,31 @@ Cast-Buttons crashte zuverlässig mit
   `MediaSession` — keine Änderung an `PlayerViewModel`/`NowPlayingScreen`
   nötig
 
-`assembleDebug` **und** `assembleRelease` (R8) bauen ✅ — **Verifikation über
-Android Auto Desktop Head Unit (DHU) noch nicht durchgeführt** (nicht Teil
-der bereits installierten Command-Line-Tools); Browse-Baum-Code ist durch
-Build + Review abgedeckt, echter DHU-/Fahrzeug-Test steht noch aus.
+`assembleDebug` **und** `assembleRelease` (R8) bauen ✅.
+
+**Verifikation auf Android-Automotive-OS-Emulator (2026-07-16, API 33,
+`android-automotive` x86_64):** App installiert und startet crash-frei,
+erscheint mit neuem Icon im App-Grid, `android.media.browse.MediaBrowserService`
+ist system-seitig korrekt registriert (`dumpsys package` bestätigt
+`MukkePlayerService` als Resolver für `MediaSessionService`,
+`MediaLibraryService` und `MediaBrowserService`). Erscheint erwartungsgemäß
+**nicht** in der „Media apps"-Quellenauswahl der Car-Media-App — das ist kein
+Bug, sondern weil das Manifest gezielt für **Android Auto** (Phone-Projection,
+`com.google.android.gms.car.application`) konfiguriert ist, nicht für die
+eigenständigen, strengeren Anforderungen von nativem **Android Automotive
+OS** (separates `com.android.automotive`-Meta-Data, `uses-feature
+android.hardware.type.automotive`, kein Launcher-Activity in einem eigenen
+Automotive-Modul — eigene Zielplattform, hier nicht angestrebt).
+
+**Echter DHU-Test (Android Auto Phone-Projection) weiterhin offen:**
+DHU 2.0 ist installiert (`%ANDROID_SDK%\extras\google\auto\`), scheitert aber
+am fehlenden Android-Auto-App-Build auf dem Test-Emulator — Play Store
+erfordert Google-Anmeldung (nicht headless automatisierbar), ein
+Sideload von APKMirror ist an Cloudflares Bot-Schutz gescheitert (kein
+scriptbarer Download möglich, kein Umgehungsversuch unternommen). Nächster
+sinnvoller Schritt: echtes Pixel 8 Pro per USB, aktuelle Android-Auto-App aus
+dem Play Store, Entwicklermodus + „Head Unit Server starten", dann
+`adb forward tcp:5277 tcp:5277` + `desktop-head-unit.exe`.
 
 ---
 
@@ -477,11 +498,15 @@ Ordnern/Trackzahlen).
 
 ## Vorarbeiten (Owner)
 
-- [ ] `schliemannosaurusrex.de` registrieren — **vor erstem AAB-Upload**
-- [ ] `mukkeklopper.app` registrieren — für Projektseite + Datenschutzerklärung
+Ausführliche, abhakbare Checkliste inkl. Data-Safety-Entwurf und
+Privacy-Policy-Draft: [`docs/play-store-checklist.md`](docs/play-store-checklist.md).
+
+- [x] `schliemannosaurusrex.de` registriert
+- [ ] Projektseite unter `web/` aufsetzen (Store-Listing-Link,
+      Datenschutzerklärung-Hosting) — **in Arbeit**
 - [ ] Google Play Console Developer-Konto anlegen (25 $)
-- [ ] Datenschutzseite aufsetzen (erforderliche URL für Store-Listing)
-- [ ] Upload-Keystore generieren + in Bitwarden ablegen
+- [ ] Upload-Keystore generieren + in Bitwarden ablegen (separat vom lokalen
+      Test-Keystore `android/keystore/mukkeklopper-test.jks`)
 - [ ] Trademark-Check: DPMA / USPTO für „MukkeKlopper"
 - [ ] 12 Tester für Closed Testing organisieren
 

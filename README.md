@@ -61,6 +61,10 @@ ist separat und liegt nicht in diesem Repository.
 - [`STATUS.md`](STATUS.md) — abgeschlossene Phasen, offene Punkte, Geräteverifikation
 - [`PLAN.md`](PLAN.md) — ursprüngliche Phasenplanung
 - [`idea.md`](idea.md) — Netzwerk-Logik & Play-Store-Anforderungen
+- [`docs/play-store-checklist.md`](docs/play-store-checklist.md) — abhakbare
+  Play-Store-Vorbereitung inkl. Data-Safety-Entwurf
+- [`docs/privacy-policy-de.md`](docs/privacy-policy-de.md) — Datenschutzerklärung-Entwurf
+  zum späteren Hosting unter `web/`
 
 ## Lizenz
 
