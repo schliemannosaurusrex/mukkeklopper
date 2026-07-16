@@ -8,6 +8,9 @@
 *.iml
 .DS_Store
 
+# Persönliche KI-Tooling-Config (Cursor), unabhängig von der App
+.cursor/
+
 # Lokale SDK-Pfade / Maschinen-spezifisch
 local.properties
 

@@ -34,8 +34,27 @@
   - `ACCESS_FINE_LOCATION` (Modus B, deklariert ab v1)
   - `FOREGROUND_SERVICE_MEDIA_PLAYBACK`, `FOREGROUND_SERVICE_DATA_SYNC`
   - `ACCESS_LOCAL_NETWORK` (forward-declared für Android 17 / API 37)
-- Launcher-Icon (adaptiv, Teal-Hintergrund + Play-Triangle)
+- Launcher-Icon (adaptiv, Teal-Hintergrund + Play-Triangle) — **ersetzt 2026-07-15**, siehe unten
 - `assembleDebug` baut fehlerfrei durch ✅
+
+### Icon-Branding (2026-07-15)
+
+- Ursprünglicher Plan „SVG-Icon von Hand nachbauen" verworfen — handgezeichnete Vektorpfade für ein
+  fotorealistisches Faust-Motiv sahen unbrauchbar aus; SVG ist für dieses Motiv das falsche Werkzeug.
+- Referenz-Bild war zusätzlich nur 137×140 px (Thumbnail) — zu klein zum Hochskalieren.
+- Stattdessen: Icon (Faust + Audio-Equalizer + Impact-Effekt, dunkler Hintergrund) per KI-Bildgenerierung
+  in 1024×1024 neu erzeugt, weiße Rundungs-Artefakte in den Ecken gepatcht, Master abgelegt unter
+  `assets/icon/mukkeklopper-icon-1024.png`.
+- Daraus abgeleitet:
+  - `assets/icon/play-store-512.png` — 512×512 für Play-Store-Listing
+  - `android/app/src/main/res/mipmap-{mdpi,hdpi,xhdpi,xxhdpi,xxxhdpi}/ic_launcher.png` + `ic_launcher_round.png`
+    (Raster-Fallback, circular-masked für die Round-Variante)
+  - `android/app/src/main/res/drawable-nodpi/ic_launcher_foreground_art.png` (auf 88 % Safe-Zone-Inset
+    skaliert) — referenziert von `ic_launcher_foreground.xml` (jetzt `<bitmap>` statt Vektor-Pfaden)
+  - `ic_launcher_background.xml` — Solid-Color `#060606` (ersetzt Teal `#00897B`)
+- `mipmap-anydpi-v26/ic_launcher.xml` / `ic_launcher_round.xml` unverändert (referenzieren weiter
+  `@drawable/ic_launcher_background` + `@drawable/ic_launcher_foreground`).
+- `assembleDebug` nach Umstellung erneut grün.
 
 ### Phase 2 — Audio-Player-Kern
 
@@ -144,11 +163,11 @@ Neue Settings-Keys: `server_user`, `auth_method`, `auth_secret`, `ssh_key_seed`,
 
 ### Phase 4 — Geräteverifikation (2026-07-14, Pixel 8 Pro, Android 17 / API 37)
 
-**End-to-End am echten Server (`finch`, SSH-Key-Auth) durchgespielt — alles grün:**
+**End-to-End am echten Server (`<sync-host>`, SSH-Key-Auth) durchgespielt — alles grün:**
 
 | Test | Ergebnis |
 |------|----------|
-| „Test connection" | „OK — host key verified"; gepinnter Fingerprint `64:c6:…:17:b9` = echter Ed25519-Host-Key von finch ✅ |
+| „Test connection" | „OK — host key verified"; gepinnter Fingerprint stimmt mit dem echten Ed25519-Host-Key von `<sync-host>` überein ✅ |
 | SSH-Key in-App generieren + `authorized_keys` | Publickey-Auth funktioniert ✅ |
 | Erster Sync (3 Dateien, MP3 + FLAC) | „3 downloaded"; Ordnerstruktur 1:1 unter `Music/MukkeKlopper/Testartist/Testalbum/`, Größen exakt ✅ |
 | Zweiter Sync (Delta) | „0 downloaded, 3 up to date" ✅ |
@@ -299,7 +318,7 @@ Enable-Switch + Slider reagieren, keine Crashes im Logcat.
 
 ### Sync-Fix — Passwort-Authentifizierung (2026-07-15)
 
-- Diagnose: Publickey-Auth war am echten Server (`finch`) bereits verifiziert,
+- Diagnose: Publickey-Auth war am echten Server (`<sync-host>`) bereits verifiziert,
   Passwort-Auth hingegen nie. Die rohe sshj-`UserAuthException`
   („Exhausted available authentication methods") wurde 1:1 durchgereicht,
   ohne zu verraten, ob der Server `PasswordAuthentication` überhaupt anbietet
@@ -414,7 +433,7 @@ Build + Review abgedeckt, echter DHU-/Fahrzeug-Test steht noch aus.
 - Ordnernavigation, Startordner, Verschieben (eigene + fremde Dateien) noch nicht
   am echten Gerät getestet (nur Code-Review + Build)
 - SSH-Sync ist im Emulator ohne Zugriff auf das Heimnetz nur eingeschränkt
-  testbar (kein „finch"-Server erreichbar) — Sync-UI/Backup/Equalizer wurden
+  testbar (kein `<sync-host>` erreichbar) — Sync-UI/Backup/Equalizer wurden
   daher isoliert am Emulator, die eigentliche Sync-Engine bereits zuvor am
   echten Pixel 8 Pro end-to-end verifiziert (siehe Phase 4 oben)
 
@@ -431,8 +450,8 @@ Build + Review abgedeckt, echter DHU-/Fahrzeug-Test steht noch aus.
   Equalizer-Button
 
 **Bug gefunden und behoben (Rename-Nachwirkung):** Der Library-Browser
-öffnete auf diesem Gerät weiterhin `Storage/Music/KaniAmp/DANIEL/` (leer)
-statt `Storage/Music/MukkeKlopper/DANIEL/` (voller, echter Bestand) —
+öffnete auf diesem Gerät weiterhin `Storage/Music/KaniAmp/<artist>/` (leer)
+statt `Storage/Music/MukkeKlopper/<artist>/` (voller, echter Bestand) —
 Ursache: `library_root` war vor der Umbenennung auf den alten Pfad gepinnt
 worden und die Rename-Migration hatte diesen App-internen Einstellungswert
 übersehen (physische Dateien und neue Syncs waren bereits korrekt unter
@@ -456,7 +475,7 @@ Ordnern/Trackzahlen).
 
 ---
 
-## Vorarbeiten (Daniel)
+## Vorarbeiten (Owner)
 
 - [ ] `schliemannosaurusrex.de` registrieren — **vor erstem AAB-Upload**
 - [ ] `mukkeklopper.app` registrieren — für Projektseite + Datenschutzerklärung
