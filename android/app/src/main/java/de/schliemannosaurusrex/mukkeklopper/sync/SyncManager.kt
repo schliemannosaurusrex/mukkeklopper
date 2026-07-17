@@ -2,6 +2,8 @@ package de.schliemannosaurusrex.mukkeklopper.sync
 
 import android.content.Context
 import android.content.Intent
+import android.net.Uri
+import android.provider.MediaStore
 import de.schliemannosaurusrex.mukkeklopper.debug.AppLog
 import de.schliemannosaurusrex.mukkeklopper.network.NetworkGatekeeper
 import de.schliemannosaurusrex.mukkeklopper.network.SyncDecision
@@ -29,6 +31,8 @@ object SyncManager {
     @Volatile
     private var deletionDecision: CompletableDeferred<Boolean>? = null
     @Volatile
+    private var writeAccessDecision: CompletableDeferred<Boolean>? = null
+    @Volatile
     private var cancelRequested = false
 
     val isRunning: Boolean get() = running.get()
@@ -44,10 +48,16 @@ object SyncManager {
     fun cancel() {
         cancelRequested = true
         deletionDecision?.cancel()
+        writeAccessDecision?.cancel()
     }
 
     fun confirmDeletions(delete: Boolean) {
         deletionDecision?.complete(delete)
+    }
+
+    /** Ergebnis des System-Write-Grant-Dialogs (RESULT_OK = erteilt). */
+    fun confirmWriteAccess(granted: Boolean) {
+        writeAccessDecision?.complete(granted)
     }
 
     fun clearResult() {
@@ -79,6 +89,7 @@ object SyncManager {
                     _state.value = newState
                 },
                 confirmDeletions = ::awaitDeletionDecision,
+                requestWriteAccess = { uris -> awaitWriteAccessDecision(appContext, uris) },
             )
             _state.value = result
             runCatching { repository.setLastSyncReport(result.failures) }
@@ -97,6 +108,7 @@ object SyncManager {
             _state.value = SyncState.Failed(e.message ?: e.javaClass.simpleName)
         } finally {
             deletionDecision = null
+            writeAccessDecision = null
             running.set(false)
         }
     }
@@ -109,6 +121,30 @@ object SyncManager {
             decision.await()
         } finally {
             deletionDecision = null
+        }
+    }
+
+    /**
+     * Holt den User-Write-Grant für fremd-eigene MediaStore-Einträge ein: publiziert
+     * den [android.provider.MediaStore.createWriteRequest]-IntentSender als State,
+     * die Sync-UI startet den System-Dialog und meldet das Ergebnis über
+     * [confirmWriteAccess] zurück. Ohne sichtbare UI (Auto-Sync) ruft die Engine
+     * diese Funktion nicht auf.
+     */
+    private suspend fun awaitWriteAccessDecision(context: Context, uris: List<Uri>): Boolean {
+        val request = runCatching {
+            MediaStore.createWriteRequest(context.contentResolver, uris).intentSender
+        }.getOrElse { e ->
+            AppLog.w(TAG, "createWriteRequest failed", e)
+            return false
+        }
+        val decision = CompletableDeferred<Boolean>()
+        writeAccessDecision = decision
+        _state.value = SyncState.AwaitWriteAccess(request)
+        return try {
+            decision.await()
+        } finally {
+            writeAccessDecision = null
         }
     }
 

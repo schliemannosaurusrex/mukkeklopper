@@ -13,8 +13,13 @@ enum class FailureReason {
     CONNECTION_LOST,
     OUT_OF_SPACE,
     MEDIASTORE_REJECTED,
+    /** Lokale Datei gehört einer anderen App — Überschreiben braucht einen User-Write-Grant. */
+    NOT_OWNED,
     UNKNOWN,
 }
+
+/** Bestehender MediaStore-Eintrag fremder Herkunft, ohne erteilten Write-Grant. */
+class NotOwnedException(message: String) : Exception(message)
 
 /** Eine einzelne fehlgeschlagene Datei aus dem letzten Sync-Lauf. */
 @Serializable
@@ -36,6 +41,10 @@ fun classifyFailure(e: Throwable): FailureReason = when {
         Response.StatusCode.CONNECITON_LOST, Response.StatusCode.NO_CONNECTION -> FailureReason.CONNECTION_LOST
         else -> FailureReason.UNKNOWN
     }
+    e is NotOwnedException -> FailureReason.NOT_OWNED
+    // MediaStore wirft bei fehlender Ownership eine SecurityException
+    // ("... has no access to content://media/...").
+    e is SecurityException -> FailureReason.NOT_OWNED
     e is IOException && e.message.orEmpty().contains("MediaStore", ignoreCase = true) ->
         FailureReason.MEDIASTORE_REJECTED
     e is IOException && (
@@ -53,5 +62,7 @@ fun FailureReason.displayText(): String = when (this) {
     FailureReason.CONNECTION_LOST -> "Connection lost"
     FailureReason.OUT_OF_SPACE -> "Not enough storage space on device"
     FailureReason.MEDIASTORE_REJECTED -> "Device storage rejected the file"
+    FailureReason.NOT_OWNED ->
+        "No write access to this file — run a manual sync and approve the permission dialog"
     FailureReason.UNKNOWN -> "Unknown error"
 }

@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import de.schliemannosaurusrex.mukkeklopper.network.NetworkGatekeeper
 import de.schliemannosaurusrex.mukkeklopper.network.SyncDecision
+import de.schliemannosaurusrex.mukkeklopper.player.EqualizerManager
 import de.schliemannosaurusrex.mukkeklopper.sync.SshKeys
 import de.schliemannosaurusrex.mukkeklopper.sync.SyncWorker
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -103,6 +104,9 @@ class SettingsViewModel(application: Application) : AndroidViewModel(application
     suspend fun applyImportedConfig(config: ConfigExport, passphrase: String?): Result<Unit> = runCatching {
         ConfigExporter.apply(repository, config, passphrase)
         SyncWorker.setEnabled(getApplication(), config.sync.autoSyncEnabled)
+        // Equalizer sofort auf die laufende Audio-Session anwenden, nicht erst beim
+        // nächsten attach() (Player-Neustart).
+        config.player?.let { EqualizerManager.applyImported(getApplication(), it.equalizer) }
         refreshSshPublicKey()
     }
 

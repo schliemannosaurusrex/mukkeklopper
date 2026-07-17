@@ -31,9 +31,12 @@
             android:name="com.google.android.gms.car.application"
             android:resource="@xml/automotive_app_desc" />
 
+        <!-- Portrait-Lock: das Player-Layout ist nicht für Landscape ausgelegt,
+             die Ansicht bleibt beim Drehen erhalten (bewusste Entscheidung). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
+            android:screenOrientation="portrait"
             android:theme="@style/Theme.MukkeKlopper">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

@@ -31,7 +31,11 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.IntentSenderRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
@@ -52,6 +56,20 @@ fun SyncScreen(
     val state by viewModel.state.collectAsState()
     val settings by viewModel.settings.collectAsState()
     val startSync = rememberWithLocalNetworkPermission { viewModel.startSync() }
+
+    // Fremd-eigene Dateien überschreiben/löschen: Android verlangt einen
+    // User-Write-Grant über den System-Dialog (gleiches Muster wie LibraryScreen).
+    val writeAccessLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartIntentSenderForResult()
+    ) { result ->
+        viewModel.confirmWriteAccess(result.resultCode == android.app.Activity.RESULT_OK)
+    }
+    val writeAccessRequest = (state as? SyncState.AwaitWriteAccess)?.request
+    LaunchedEffect(writeAccessRequest) {
+        writeAccessRequest?.let {
+            writeAccessLauncher.launch(IntentSenderRequest.Builder(it).build())
+        }
+    }
 
     Column(
         modifier = modifier
@@ -137,6 +155,9 @@ fun SyncScreen(
                 RunningCard("Waiting for delete confirmation…", viewModel)
                 DeletionDialog(paths = s.paths, viewModel = viewModel)
             }
+
+            is SyncState.AwaitWriteAccess ->
+                RunningCard("Waiting for write permission…", viewModel)
 
             is SyncState.Finished -> {
                 ResultCard(

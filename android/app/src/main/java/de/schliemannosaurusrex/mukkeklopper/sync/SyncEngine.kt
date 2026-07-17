@@ -38,12 +38,19 @@ class SyncEngine(
     private val appContext = context.applicationContext
 
     data class RemoteTrack(val relPath: String, val size: Long, val mtimeSec: Long)
-    data class LocalTrack(val relPath: String, val uri: Uri, val size: Long, val mtimeSec: Long)
+    data class LocalTrack(
+        val relPath: String,
+        val uri: Uri,
+        val size: Long,
+        val mtimeSec: Long,
+        val isOwnedByApp: Boolean,
+    )
 
     suspend fun sync(
         interactive: Boolean,
         onState: (SyncState) -> Unit,
         confirmDeletions: suspend (List<String>) -> Boolean,
+        requestWriteAccess: suspend (List<Uri>) -> Boolean,
         retryOnly: Set<String>? = null,
     ): SyncState.Finished = withContext(Dispatchers.IO) {
         val settings = settingsRepository.settings.first()
@@ -83,10 +90,41 @@ class SyncEngine(
                 // betrachtet nur die übergebenen Pfade, nicht den ganzen Bestand.
                 val stale = if (retryOnly != null) emptySet() else local.keys - remote.map { it.relPath }.toSet()
 
+                // Fremd-eigene Einträge (App nicht Owner, z. B. nach Neuinstallation) lassen
+                // sich nur mit User-Write-Grant überschreiben/löschen. Ein Grant-Dialog
+                // deckt alle betroffenen URIs ab; ohne Grant werden sie übersprungen.
+                val foreignTargets = (
+                    toDownload.mapNotNull { local[it.relPath] } +
+                        stale.mapNotNull { local[it] }
+                    ).filterNot { it.isOwnedByApp }
+                val writeAccessGranted = if (foreignTargets.isEmpty()) {
+                    true
+                } else {
+                    val granted = interactive && requestWriteAccess(foreignTargets.map { it.uri })
+                    AppLog.i(
+                        TAG,
+                        "write access for ${foreignTargets.size} foreign entries: " +
+                            "granted=$granted (interactive=$interactive)",
+                    )
+                    granted
+                }
+
                 var downloaded = 0
                 val failures = mutableListOf<SyncFailure>()
                 toDownload.forEachIndexed { index, track ->
                     currentCoroutineContext().ensureActive()
+                    val existing = local[track.relPath]
+                    if (existing != null && !existing.isOwnedByApp && !writeAccessGranted) {
+                        failures += SyncFailure(
+                            relPath = track.relPath,
+                            reason = FailureReason.NOT_OWNED,
+                            detail = "File is owned by another app and write access was not granted",
+                            bytesDone = 0,
+                            bytesTotal = track.size,
+                            timestamp = System.currentTimeMillis(),
+                        )
+                        return@forEachIndexed
+                    }
                     var lastBytesDone = 0L
                     onState(
                         SyncState.Downloading(
@@ -98,7 +136,7 @@ class SyncEngine(
                         )
                     )
                     val ok = runCatching {
-                        download(sftp, settings.remoteBasePath, track, local[track.relPath]) { done ->
+                        download(sftp, settings.remoteBasePath, track, existing) { done ->
                             lastBytesDone = done
                             onState(
                                 SyncState.Downloading(
@@ -238,6 +276,7 @@ class SyncEngine(
             MediaStore.Audio.Media.RELATIVE_PATH,
             MediaStore.Audio.Media.SIZE,
             MediaStore.Audio.Media.DATE_MODIFIED,
+            MediaStore.Audio.Media.OWNER_PACKAGE_NAME,
         )
         appContext.contentResolver.query(
             collection,
@@ -251,6 +290,7 @@ class SyncEngine(
             val pathCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.RELATIVE_PATH)
             val sizeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.SIZE)
             val mtimeCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.DATE_MODIFIED)
+            val ownerCol = cursor.getColumnIndexOrThrow(MediaStore.Audio.Media.OWNER_PACKAGE_NAME)
 
             while (cursor.moveToNext()) {
                 val relDir = (cursor.getString(pathCol) ?: continue).removePrefix(SYNC_ROOT)
@@ -261,6 +301,7 @@ class SyncEngine(
                     uri = ContentUris.withAppendedId(collection, cursor.getLong(idCol)),
                     size = cursor.getLong(sizeCol),
                     mtimeSec = cursor.getLong(mtimeCol),
+                    isOwnedByApp = cursor.getString(ownerCol) == appContext.packageName,
                 )
             }
         }
@@ -281,11 +322,17 @@ class SyncEngine(
         val pending = ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 1) }
         val ready = ContentValues().apply { put(MediaStore.Audio.Media.IS_PENDING, 0) }
 
-        val isNew = existing == null
-        val uri: Uri = if (existing != null) {
+        // Fremd-eigene Einträge nicht in-place updaten, sondern löschen und neu anlegen
+        // (Self-Healing): der neue Eintrag gehört dann dieser App, künftige Syncs
+        // kommen ohne Write-Grant aus. Der Grant dafür wurde vorab eingeholt.
+        val isNew = existing == null || !existing.isOwnedByApp
+        val uri: Uri = if (existing != null && existing.isOwnedByApp) {
             resolver.update(existing.uri, pending, null, null)
             existing.uri
         } else {
+            if (existing != null) {
+                resolver.delete(existing.uri, null, null)
+            }
             val name = track.relPath.substringAfterLast('/')
             val subDir = track.relPath.substringBeforeLast('/', "")
             val values = ContentValues().apply {

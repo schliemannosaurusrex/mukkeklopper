@@ -1,6 +1,6 @@
 # MukkeKlopper — Projektstatus
 
-**Stand:** 2026-07-15  
+**Stand:** 2026-07-17  
 **App-ID:** `de.schliemannosaurusrex.mukkeklopper`  
 **Publisher:** SchliemannosaurusRex  
 
@@ -445,9 +445,56 @@ sinnvoller Schritt: echtes Pixel 8 Pro per USB, aktuelle Android-Auto-App aus
 dem Play Store, Entwicklermodus + „Head Unit Server starten", dann
 `adb forward tcp:5277 tcp:5277` + `desktop-head-unit.exe`.
 
+### Sieben Findings behoben (2026-07-17)
+
+Analyse + Plan: `.todos/2026-07-16-findings-sync-export-cast-ui-playback.md`.
+
+1. **Sync — „has no access to content://media/…":** `SyncEngine` prüft jetzt
+   `OWNER_PACKAGE_NAME`; fremd-eigene Einträge (z. B. nach Neuinstallation)
+   werden beim manuellen Sync über einen `MediaStore.createWriteRequest`-Dialog
+   freigegeben (`SyncState.AwaitWriteAccess`, Launcher in `SyncScreen`) und per
+   **delete + insert** ersetzt — die App wird dadurch wieder Owner
+   (Self-Healing). Auto-Sync ohne Grant überspringt betroffene Titel mit neuem
+   `FailureReason.NOT_OWNED`; `classifyFailure` mappt `SecurityException` nicht
+   mehr auf „Unknown error".
+2. **Config-Export v2:** `ConfigExport` enthält jetzt `player.equalizer`
+   (EqualizerSettings) und `debug.debugLogEnabled`; `CURRENT_VERSION = 2`,
+   v1-Dateien bleiben importierbar (neue Felder nullable). Import wendet den
+   Equalizer sofort auf die laufende Session an
+   (`EqualizerManager.applyImported`, normalisiert Band-Levels auf die
+   Geräte-Bandzahl).
+3. **Cast:** `transferPlayback()` überträgt Queue, Index, Position und
+   Play-Status beim Session-Wechsel in beide Richtungen (Exo ↔ Cast) — vorher
+   startete der CastPlayer leer („kein Titel ausgewählt").
+4. **Rotation:** `android:screenOrientation="portrait"` an der `MainActivity` —
+   das Player-Layout ist nicht für Landscape ausgelegt.
+5. **Navigation:** `navigateToTab` poppt Nested-Routen (`equalizer`, `queue`,
+   `sync_failures`, `debug_log`) vor dem Tab-Wechsel — Rückkehr-Klick landet
+   wieder auf der Tab-Root statt in der alten Unter-Ansicht.
+6. **Letzter Titel:** Neuer DataStore-Key `playback_state`
+   (`player/PlaybackState.kt`: Queue-Track-IDs, Index, Position), geschrieben
+   bei Titelwechsel/Pause/`onDestroy`; Wiederherstellung beim Service-Start
+   (still, ohne Auto-Play) und via `onPlaybackResumption`. Gelöschte Tracks
+   werden beim Auflösen übersprungen; bewusst nicht Teil des Config-Exports.
+7. **Android Auto:** Browse-Einstieg (`ROOT_ID`) zeigt das in der App markierte
+   Startverzeichnis (`library_root`) statt der MediaStore-Wurzel.
+
+Build `assembleDebug` grün, Installation + Smoke-Test (Start, Library-Cache,
+EqualizerManager-Attach) am Pixel 8 Pro OK. Funktionale Geräteverifikation der
+einzelnen Findings: siehe „Offen".
+
 ---
 
 ## Offen 🔲
+
+### Geräteverifikation der sieben Findings (2026-07-17)
+
+- Sync-Write-Grant-Dialog + Self-Healing am echten Server/Gerät durchspielen
+  (betroffener Titel: fremd-eigener MediaStore-Eintrag)
+- Cast-Übernahme des laufenden Titels auf Google Home Mini
+- Equalizer-Export/Import (v2-Datei) inkl. Live-Anwendung
+- Letzter Titel nach App-Neustart im Player-Tab
+- Android-Auto-Einstieg im Startordner (DHU oder Fahrzeug)
 
 ### Geräteverifikation Phase 8 & Emulator-Grenzen
 

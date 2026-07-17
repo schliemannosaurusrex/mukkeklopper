@@ -1,10 +1,14 @@
 package de.schliemannosaurusrex.mukkeklopper.settings
 
+import de.schliemannosaurusrex.mukkeklopper.player.EqualizerSettings
 import kotlinx.serialization.Serializable
 
 /**
  * Export-/Import-Format für die Einstellungen (PLAN.md Phase 4b). Secrets sind
  * standardmäßig nicht enthalten; nur mit explizitem Opt-in als [EncryptedSecrets].
+ *
+ * Version 2: [player] (Equalizer) und [debug] ergänzt — beide nullable, damit
+ * v1-Dateien weiterhin ohne Migration importierbar bleiben.
  */
 @Serializable
 data class ConfigExport(
@@ -13,10 +17,13 @@ data class ConfigExport(
     val network: NetworkConfig,
     val library: LibraryConfig,
     val sync: SyncConfig,
+    val player: PlayerConfig? = null,
+    val debug: DebugConfig? = null,
     val secrets: EncryptedSecrets? = null,
 ) {
     companion object {
-        const val CURRENT_VERSION = 1
+        const val CURRENT_VERSION = 2
+        const val MIN_SUPPORTED_VERSION = 1
     }
 }
 
@@ -45,6 +52,18 @@ data class LibraryConfig(
 @Serializable
 data class SyncConfig(
     val autoSyncEnabled: Boolean,
+)
+
+/** Player-Einstellungen (seit v2). Bandzahl des Equalizers ist geräteabhängig. */
+@Serializable
+data class PlayerConfig(
+    val equalizer: EqualizerSettings,
+)
+
+/** Debug-Einstellungen (seit v2). */
+@Serializable
+data class DebugConfig(
+    val debugLogEnabled: Boolean,
 )
 
 /** Passphrase-verschlüsselter Umschlag um [SecretsPayload] (PBKDF2 → AES-256-GCM). */
