@@ -435,15 +435,33 @@ OS** (separates `com.android.automotive`-Meta-Data, `uses-feature
 android.hardware.type.automotive`, kein Launcher-Activity in einem eigenen
 Automotive-Modul — eigene Zielplattform, hier nicht angestrebt).
 
-**Echter DHU-Test (Android Auto Phone-Projection) weiterhin offen:**
-DHU 2.0 ist installiert (`%ANDROID_SDK%\extras\google\auto\`), scheitert aber
-am fehlenden Android-Auto-App-Build auf dem Test-Emulator — Play Store
-erfordert Google-Anmeldung (nicht headless automatisierbar), ein
-Sideload von APKMirror ist an Cloudflares Bot-Schutz gescheitert (kein
-scriptbarer Download möglich, kein Umgehungsversuch unternommen). Nächster
-sinnvoller Schritt: echtes Pixel 8 Pro per USB, aktuelle Android-Auto-App aus
-dem Play Store, Entwicklermodus + „Head Unit Server starten", dann
-`adb forward tcp:5277 tcp:5277` + `desktop-head-unit.exe`.
+**Echter DHU-Test (Android Auto Phone-Projection) — erfolgreich (2026-07-16,
+Pixel 8 Pro, Android Auto 17.1.662414):** Entwicklermodus per 10x-Tap auf
+„Version" in den Android-Auto-Einstellungen aktiviert, „Server für
+Infotainmentsystem starten" (Port 5277) + `adb forward tcp:5277 tcp:5277` +
+`desktop-head-unit.exe` verbunden (TLS-Handshake ok, Protokoll 1.7).
+MukkeKlopper erscheint im App-Grid und in der Medienquellen-Auswahl,
+`MediaLibrarySession` verbindet erfolgreich.
+
+Erster Testlauf zeigte „Keine Elemente" im Browse-Baum — Ursache **keine
+strukturelle Baustelle**, sondern eine fehlende Laufzeitberechtigung:
+`READ_MEDIA_AUDIO` wird bisher ausschließlich aus `LibraryScreen`
+angefordert (Dialog beim ersten Öffnen der App-UI). Nach einer
+Neuinstallation, die direkt über Android Auto statt über die App-UI
+gestartet wird, fehlt die Berechtigung, `MediaStoreRepository.loadTracks()`
+liefert daher eine leere Liste. Fix für den Test: Berechtigung per
+`adb shell pm grant … READ_MEDIA_AUDIO` nachträglich erteilt, App-Prozess
+per `force-stop` neu initialisiert (kein Codepfad geändert, `ensureLibraryLoaded()`
+lädt ohnehin bei leerem Cache automatisch neu). Danach: „Für mich"-Kachel
+zeigt echte MukkeKlopper-Titel mit App-Icon-Badge, voller Ordnerbaum
+(Artist-/Album-Ordner, A-Z-Sortierung, Suche) browsebar, Titel abspielbar.
+
+Offene Onboarding-Frage für den Play-Store-Release: Nutzer, die MukkeKlopper
+nie manuell auf dem Handy öffnen, sondern direkt über Android Auto starten,
+sehen ohne erteilte Berechtigung eine leere Bibliothek. Kein Fix umgesetzt
+(nicht angefordert) — als bekanntes Verhalten dokumentiert, vergleichbar mit
+anderen Medien-Apps, die eine einmalige Ersteinrichtung in der eigenen
+App-UI voraussetzen.
 
 ---
 
@@ -486,8 +504,8 @@ Ordnern/Trackzahlen).
 - Sync-Retry mit Passwort-Methode bei aktivem Debug-Log noch nicht am echten
   Server wiederholt (finale Ursachenklärung Server-Config vs. falsches
   Passwort steht aus)
-- Android-Auto-Browse-Baum noch nicht per Desktop Head Unit (DHU) oder im
-  Fahrzeug verifiziert
+- Android-Auto-Browse-Baum per Desktop Head Unit (DHU) verifiziert (s.
+  Android-Auto-Abschnitt oben) — Test im echten Fahrzeug steht noch aus
 
 ### Zurückgestellt ⏸
 
