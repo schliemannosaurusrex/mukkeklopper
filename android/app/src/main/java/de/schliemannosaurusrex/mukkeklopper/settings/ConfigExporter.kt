@@ -54,6 +54,8 @@ object ConfigExporter {
                 viewMode = settings.libraryViewMode.storageValue,
             ),
             sync = SyncConfig(autoSyncEnabled = settings.autoSyncEnabled),
+            player = PlayerConfig(equalizer = repository.equalizerSettings.first()),
+            debug = DebugConfig(debugLogEnabled = settings.debugLogEnabled),
             secrets = secrets,
         )
         AppLog.i(TAG, "exported config (includeCredentials=$includeCredentials)")
@@ -63,7 +65,9 @@ object ConfigExporter {
     /** @throws SerializationException bei ungültigem JSON oder fehlenden Pflichtfeldern. */
     fun parse(text: String): ConfigExport {
         val config = json.decodeFromString<ConfigExport>(text)
-        if (config.version != ConfigExport.CURRENT_VERSION) {
+        // v1-Dateien bleiben importierbar: die seit v2 ergänzten Felder sind nullable
+        // mit Default und fehlen dort einfach.
+        if (config.version !in ConfigExport.MIN_SUPPORTED_VERSION..ConfigExport.CURRENT_VERSION) {
             throw SerializationException("Unsupported config version: ${config.version}")
         }
         return config
@@ -90,6 +94,10 @@ object ConfigExporter {
         }
 
         repository.setAutoSyncEnabled(config.sync.autoSyncEnabled)
+
+        // Seit v2 vorhanden; bei v1-Dateien bleiben die Ziel-Werte unverändert.
+        config.player?.let { repository.setEqualizerSettings(it.equalizer) }
+        config.debug?.let { repository.setDebugLogEnabled(it.debugLogEnabled) }
 
         val secrets = config.secrets
         if (secrets != null && !passphrase.isNullOrEmpty()) {

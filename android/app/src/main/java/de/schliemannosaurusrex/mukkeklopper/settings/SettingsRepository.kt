@@ -10,6 +10,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import de.schliemannosaurusrex.mukkeklopper.player.EqualizerSettings
+import de.schliemannosaurusrex.mukkeklopper.player.PlaybackState
 import de.schliemannosaurusrex.mukkeklopper.sync.SecretStore
 import de.schliemannosaurusrex.mukkeklopper.sync.SyncFailure
 import kotlinx.coroutines.flow.Flow
@@ -209,6 +210,21 @@ class SettingsRepository(context: Context) {
         dataStore.edit { it[DEBUG_LOG_ENABLED] = enabled }
     }
 
+    /** Zuletzt gespielte Queue + Position (Laufzeit-State, nicht im Config-Export). */
+    val playbackState: Flow<PlaybackState?> = dataStore.data.map { prefs ->
+        prefs[PLAYBACK_STATE]?.let { json ->
+            runCatching { Json.decodeFromString<PlaybackState>(json) }.getOrNull()
+        }
+    }
+
+    suspend fun setPlaybackState(state: PlaybackState) {
+        dataStore.edit { it[PLAYBACK_STATE] = Json.encodeToString(state) }
+    }
+
+    suspend fun clearPlaybackState() {
+        dataStore.edit { it.remove(PLAYBACK_STATE) }
+    }
+
     /**
      * Einmalige Migration für Geräte, auf denen `library_root` noch auf den alten
      * `Music/KaniAmp/…`-Pfad zeigt (vor der Umbenennung gepinnt). Die physischen Dateien
@@ -245,5 +261,6 @@ class SettingsRepository(context: Context) {
         val LAST_SYNC_REPORT = stringPreferencesKey("last_sync_report")
         val EQUALIZER_SETTINGS = stringPreferencesKey("equalizer_settings")
         val DEBUG_LOG_ENABLED = booleanPreferencesKey("debug_log_enabled")
+        val PLAYBACK_STATE = stringPreferencesKey("playback_state")
     }
 }

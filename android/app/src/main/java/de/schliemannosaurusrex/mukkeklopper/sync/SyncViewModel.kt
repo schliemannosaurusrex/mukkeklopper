@@ -39,6 +39,9 @@ class SyncViewModel(application: Application) : AndroidViewModel(application) {
 
     fun confirmDeletions(delete: Boolean) = SyncManager.confirmDeletions(delete)
 
+    /** Ergebnis des System-Write-Grant-Dialogs für fremd-eigene Dateien. */
+    fun confirmWriteAccess(granted: Boolean) = SyncManager.confirmWriteAccess(granted)
+
     fun dismissResult() = SyncManager.clearResult()
 
     /** Öffnet die WireGuard-App bzw. deren Play-Store-Seite (Blocked-Banner). */

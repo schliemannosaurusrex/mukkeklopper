@@ -18,6 +18,12 @@ sealed interface SyncState {
 
     /** Server-seitig gelöschte Dateien — lokales Löschen wartet auf Bestätigung. */
     data class ConfirmDeletions(val paths: List<String>) : SyncState
+
+    /**
+     * Fremd-eigene MediaStore-Einträge müssen überschrieben/gelöscht werden — wartet
+     * auf den System-Write-Grant-Dialog ([android.provider.MediaStore.createWriteRequest]).
+     */
+    data class AwaitWriteAccess(val request: android.content.IntentSender) : SyncState
     data class Finished(
         val downloaded: Int,
         val skipped: Int,

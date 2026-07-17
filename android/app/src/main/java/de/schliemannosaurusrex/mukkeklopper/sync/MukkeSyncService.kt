@@ -67,6 +67,7 @@ class MukkeSyncService : Service() {
             is SyncState.Downloading ->
                 "Downloading ${state.fileIndex}/${state.fileCount}: ${state.fileName}"
             is SyncState.ConfirmDeletions -> "Waiting for delete confirmation"
+            is SyncState.AwaitWriteAccess -> "Waiting for write permission"
             else -> return
         }
         val progress = (state as? SyncState.Downloading)?.let { d ->

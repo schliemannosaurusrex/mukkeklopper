@@ -132,6 +132,21 @@ object EqualizerManager {
         }
     }
 
+    /**
+     * Importierte Einstellungen (Config-Backup) auf die laufende Session anwenden.
+     * Passt die Band-Levels an die Bandzahl des Geräts an (gleiche Normalisierung
+     * wie in [attach]) — bei Mismatch werden die Levels auf 0 zurückgesetzt.
+     */
+    fun applyImported(context: Context, imported: EqualizerSettings) {
+        val bandCount = _capabilities.value?.numberOfBands
+        val normalized = if (bandCount == null || imported.bandLevels.size == bandCount) {
+            imported
+        } else {
+            imported.copy(bandLevels = List(bandCount) { 0 }, presetIndex = -1)
+        }
+        update(context) { normalized }
+    }
+
     fun setBassBoostStrength(context: Context, strength: Int) =
         update(context) { it.copy(bassBoostStrength = strength) }
 

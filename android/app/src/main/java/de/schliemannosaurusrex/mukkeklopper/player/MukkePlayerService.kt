@@ -22,11 +22,14 @@ import de.schliemannosaurusrex.mukkeklopper.debug.AppLog
 import de.schliemannosaurusrex.mukkeklopper.library.FolderTree
 import de.schliemannosaurusrex.mukkeklopper.library.MediaStoreRepository
 import de.schliemannosaurusrex.mukkeklopper.library.Track
+import de.schliemannosaurusrex.mukkeklopper.settings.SettingsRepository
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 
 /**
  * [MediaLibraryService] statt eines einfachen `MediaSessionService`, damit Android Auto einen
@@ -42,6 +45,7 @@ class MukkePlayerService : MediaLibraryService() {
     private var castPlayer: CastPlayer? = null
     private var localMediaServer: LocalMediaServer? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val settingsRepository by lazy { SettingsRepository(applicationContext) }
 
     /** Für Android Auto (Browse-Baum) und die "ganzer Ordner"-Wiedergabe beim Tippen im Auto. */
     @Volatile
@@ -53,24 +57,96 @@ class MukkePlayerService : MediaLibraryService() {
         }
     }
 
+    /**
+     * Persistiert die Queue bei Titelwechsel und Pause (bewusst nicht pro
+     * Fortschritts-Tick), damit der zuletzt gespielte Titel Neustarts überlebt.
+     */
+    private val persistenceListener = object : Player.Listener {
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            savePlaybackStateAsync()
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            if (!isPlaying) savePlaybackStateAsync()
+        }
+    }
+
+    private fun currentPlaybackState(): PlaybackState? {
+        val player = mediaSession?.player ?: exoPlayer ?: return null
+        if (player.mediaItemCount == 0) return null
+        val trackIds = (0 until player.mediaItemCount)
+            .mapNotNull { player.getMediaItemAt(it).mediaId.toLongOrNull() }
+        if (trackIds.isEmpty()) return null
+        return PlaybackState(
+            trackIds = trackIds,
+            currentIndex = player.currentMediaItemIndex.coerceIn(0, trackIds.size - 1),
+            positionMs = player.currentPosition.coerceAtLeast(0),
+        )
+    }
+
+    private fun savePlaybackStateAsync() {
+        val state = currentPlaybackState() ?: return
+        serviceScope.launch {
+            runCatching { settingsRepository.setPlaybackState(state) }
+        }
+    }
+
+    /** Löst den persistierten Zustand gegen die aktuelle Library auf (gelöschte Tracks entfallen). */
+    private suspend fun restoredQueue(): MediaSession.MediaItemsWithStartPosition? {
+        val state = settingsRepository.playbackState.first() ?: return null
+        if (state.trackIds.isEmpty()) return null
+        val tracksById = ensureLibraryLoaded().associateBy { it.id }
+        val currentTrackId = state.trackIds.getOrNull(state.currentIndex)
+        val items = state.trackIds.mapNotNull { tracksById[it] }.map(::trackMediaItem)
+        if (items.isEmpty()) return null
+        val index = items.indexOfFirst { it.mediaId == currentTrackId?.toString() }.coerceAtLeast(0)
+        val position = if (index == 0 && items[0].mediaId != currentTrackId?.toString()) 0L else state.positionMs
+        return MediaSession.MediaItemsWithStartPosition(items, index, position)
+    }
+
     private val castSessionListener = object : SessionAvailabilityListener {
         override fun onCastSessionAvailable() {
             AppLog.i(TAG, "cast session available — switching playback to CastPlayer")
             startLocalMediaServer()
-            castPlayer?.let { mediaSession?.player = it }
+            castPlayer?.let { cast ->
+                exoPlayer?.let { exo -> transferPlayback(from = exo, to = cast) }
+                mediaSession?.player = cast
+            }
         }
 
         override fun onCastSessionUnavailable() {
             AppLog.i(TAG, "cast session ended — switching playback back to local ExoPlayer")
-            exoPlayer?.let { mediaSession?.player = it }
+            exoPlayer?.let { exo ->
+                castPlayer?.let { cast -> transferPlayback(from = cast, to = exo) }
+                mediaSession?.player = exo
+            }
             stopLocalMediaServer()
         }
+    }
+
+    /**
+     * Überträgt Queue, Position und Play-Status beim Wechsel ExoPlayer ↔ CastPlayer.
+     * Ohne diesen Transfer startet der Ziel-Player leer — das Cast-Gerät zeigte dann
+     * "kein Titel ausgewählt", obwohl lokal etwas lief.
+     */
+    private fun transferPlayback(from: Player, to: Player) {
+        val items = (0 until from.mediaItemCount).map { from.getMediaItemAt(it) }
+        if (items.isEmpty()) return
+        val index = from.currentMediaItemIndex
+        val position = from.currentPosition
+        val playWhenReady = from.playWhenReady
+        from.pause()
+        to.setMediaItems(items, index, position)
+        to.prepare()
+        to.playWhenReady = playWhenReady
+        AppLog.d(TAG, "transferred ${items.size} items (index=$index pos=${position}ms play=$playWhenReady)")
     }
 
     override fun onCreate() {
         super.onCreate()
         val player = ExoPlayer.Builder(this).build()
         player.addListener(audioSessionListener)
+        player.addListener(persistenceListener)
         exoPlayer = player
         // Der Equalizer (Phase 9) braucht eine gültige Audio-Session; ExoPlayer legt sie
         // schon beim Start an, der Listener greift erst bei einem späteren Wechsel.
@@ -88,6 +164,18 @@ class MukkePlayerService : MediaLibraryService() {
 
         refreshLibraryCache()
         setUpCastPlayer()
+
+        // Zuletzt gespielte Queue still vorbereiten (kein Auto-Play), damit die UI
+        // nach App-Neustart direkt den letzten Titel zeigt. Ein Controller, der
+        // schon Items gesetzt hat, wird nicht überschrieben.
+        serviceScope.launch {
+            val restored = runCatching { restoredQueue() }.getOrNull() ?: return@launch
+            val target = mediaSession?.player ?: return@launch
+            if (target.mediaItemCount > 0) return@launch
+            target.setMediaItems(restored.mediaItems, restored.startIndex, restored.startPositionMs)
+            target.prepare()
+            AppLog.d(TAG, "restored ${restored.mediaItems.size} queue items (index=${restored.startIndex})")
+        }
     }
 
     private fun refreshLibraryCache() {
@@ -126,7 +214,14 @@ class MukkePlayerService : MediaLibraryService() {
             val future = SettableFuture.create<LibraryResult<ImmutableList<MediaItem>>>()
             serviceScope.launch {
                 val tracks = ensureLibraryLoaded()
-                val path = if (parentId == ROOT_ID) "" else parentId
+                // Der Einstieg (ROOT_ID) zeigt das in der App markierte Startverzeichnis
+                // (library_root, Stern in der Library) statt der MediaStore-Wurzel —
+                // Unterordner navigieren unverändert über echte Pfade.
+                val path = if (parentId == ROOT_ID) {
+                    settingsRepository.settings.first().libraryRoot
+                } else {
+                    parentId
+                }
                 val content = FolderTree.contentOf(tracks, path)
                 val items = content.subFolders.map { folderMediaItem(it.path, it.name) } +
                     content.tracks.map { trackMediaItem(it) }
@@ -188,6 +283,23 @@ class MukkePlayerService : MediaLibraryService() {
             }
             return future
         }
+
+        /** System-/Media-Button-Resumption: zuletzt gespielte Queue wiederherstellen. */
+        override fun onPlaybackResumption(
+            mediaSession: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
+            serviceScope.launch {
+                val restored = runCatching { restoredQueue() }.getOrNull()
+                if (restored != null) {
+                    future.set(restored)
+                } else {
+                    future.setException(IllegalStateException("No playback state to resume"))
+                }
+            }
+            return future
+        }
     }
 
     private fun folderMediaItem(mediaId: String, title: String): MediaItem =
@@ -230,6 +342,7 @@ class MukkePlayerService : MediaLibraryService() {
             castPlayer = player
             if (player.isCastSessionAvailable) {
                 startLocalMediaServer()
+                exoPlayer?.let { exo -> transferPlayback(from = exo, to = player) }
                 mediaSession?.player = player
             }
         }.onFailure {
@@ -263,6 +376,11 @@ class MukkePlayerService : MediaLibraryService() {
         mediaSession
 
     override fun onDestroy() {
+        // Letzten Stand sichern, bevor Scope und Player freigegeben werden — die
+        // Listener-basierten Speicherpunkte decken einen Service-Kill nicht ab.
+        currentPlaybackState()?.let { state ->
+            runCatching { runBlocking { settingsRepository.setPlaybackState(state) } }
+        }
         serviceScope.cancel()
         EqualizerManager.release()
         stopLocalMediaServer()

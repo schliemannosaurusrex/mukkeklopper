@@ -21,10 +21,16 @@ import androidx.navigation.NavHostController
 import de.schliemannosaurusrex.mukkeklopper.library.LibraryViewModel
 import de.schliemannosaurusrex.mukkeklopper.player.PlayerViewModel
 
-// Alle Navigationen müssen dieses Muster verwenden: ein Eintrag, der per plain
-// navigate() gepusht wurde, übersteht das popUpTo/restoreState der Bottom-Bar
-// und macht den Library-Tab wirkungslos.
+private val tabRoutes = bottomNavScreens.map { it.route }.toSet()
+
+// Alle Tab-Navigationen müssen dieses Muster verwenden. Nested-Routen (equalizer,
+// queue, sync_failures, debug_log) werden vor dem Wechsel gepoppt — sonst landen
+// sie im per saveState gesicherten Stack und der Rückkehr-Klick stellt die
+// Unter-Ansicht statt der Tab-Root wieder her.
 private fun NavHostController.navigateToTab(route: String) {
+    while (currentDestination?.route !in tabRoutes && previousBackStackEntry != null) {
+        if (!popBackStack()) break
+    }
     navigate(route) {
         popUpTo(graph.startDestinationId) { saveState = true }
         launchSingleTop = true
