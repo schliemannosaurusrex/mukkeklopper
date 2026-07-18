@@ -501,7 +501,19 @@ Build `assembleDebug` grün, Installation + Smoke-Test (Start, Library-Cache,
 EqualizerManager-Attach) am Pixel 8 Pro OK. Funktionale Geräteverifikation der
 einzelnen Findings: siehe „Offen".
 
-### Android Auto im echten Fahrzeug — kein Ton, Ursache gefunden (2026-07-18)
+### Android Auto im echten Fahrzeug — kein Ton, Ursache gefunden, danach erfolgreich verifiziert (2026-07-18)
+
+**Update (gleicher Tag, erneuter Test):** Sauberer Testaufbau — WLAN am
+Handy aus, Kabel angeschlossen, Auto eingeschaltet (Radio/Android Auto
+startet dadurch neu) → MukkeKlopper spielt **beim allerersten Versuch**
+mit Ton. Identisches Ergebnis danach mit WLAN statt Kabel (Auto erneut aus-
+und eingeschaltet). Damit **Android Auto im echten Fahrzeug erfolgreich
+verifiziert**, sowohl per Kabel als auch drahtlos. Das einmalige
+Stumm-Symptom aus dem ersten Testlauf war offenbar transient (möglicherweise
+durch den zwischenzeitlichen Handy-Neustart behoben) — reproduzierbar war es
+in dieser zweiten Runde nicht mehr, obwohl gezielt danach gesucht wurde.
+Der Workaround (App wechseln) bleibt als Notiz relevant, falls es doch
+nochmal auftritt; kein weiterer Handlungsbedarf im Code.
 
 **Symptom:** Im echten Fahrzeug (Pixel 8 Pro, sowohl Kabel als auch WLAN)
 zeigte MukkeKlopper über Android Auto Wiedergabe an (Play/Pause, Titelwechsel,
