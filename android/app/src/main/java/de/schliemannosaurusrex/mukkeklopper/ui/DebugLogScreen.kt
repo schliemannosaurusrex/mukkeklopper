@@ -97,7 +97,7 @@ fun DebugLogScreen(onBack: () -> Unit, modifier: Modifier = Modifier) {
         AlertDialog(
             onDismissRequest = { showClearDialog = false },
             title = { Text("Clear debug log?") },
-            text = { Text("This removes all buffered log entries. They are not persisted anyway.") },
+            text = { Text("This removes all buffered log entries, including the log file on disk.") },
             confirmButton = {
                 TextButton(onClick = {
                     AppLog.clear()

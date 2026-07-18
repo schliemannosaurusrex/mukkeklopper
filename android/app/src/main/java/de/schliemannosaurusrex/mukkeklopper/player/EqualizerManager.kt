@@ -102,6 +102,7 @@ object EqualizerManager {
                 stored.copy(bandLevels = List(bandCount) { 0 }, presetIndex = -1)
             }
             _settings.value = normalized
+            AppLog.d(TAG, "attach: applying enabled=${normalized.enabled} bands=${normalized.bandLevels} bass=${normalized.bassBoostStrength} virt=${normalized.virtualizerStrength}")
             applyToEffects(normalized)
         }
     }
@@ -165,14 +166,20 @@ object EqualizerManager {
 
     private fun applyToEffects(settings: EqualizerSettings) {
         runCatching { equalizer?.setEnabled(settings.enabled) }
+            .onFailure { AppLog.w(TAG, "applyToEffects: equalizer.setEnabled(${settings.enabled}) failed", it) }
         runCatching { bassBoost?.setEnabled(settings.enabled) }
+            .onFailure { AppLog.w(TAG, "applyToEffects: bassBoost.setEnabled(${settings.enabled}) failed", it) }
         runCatching { virtualizer?.setEnabled(settings.enabled) }
+            .onFailure { AppLog.w(TAG, "applyToEffects: virtualizer.setEnabled(${settings.enabled}) failed", it) }
         if (!settings.enabled) return
         settings.bandLevels.forEachIndexed { index, level ->
             runCatching { equalizer?.setBandLevel(index.toShort(), level.toShort()) }
+                .onFailure { AppLog.w(TAG, "applyToEffects: setBandLevel($index, $level) failed", it) }
         }
         runCatching { bassBoost?.setStrength(settings.bassBoostStrength.toShort()) }
+            .onFailure { AppLog.w(TAG, "applyToEffects: bassBoost.setStrength(${settings.bassBoostStrength}) failed", it) }
         runCatching { virtualizer?.setStrength(settings.virtualizerStrength.toShort()) }
+            .onFailure { AppLog.w(TAG, "applyToEffects: virtualizer.setStrength(${settings.virtualizerStrength}) failed", it) }
     }
 
     private fun releaseEffects() {

@@ -2,12 +2,17 @@ package de.schliemannosaurusrex.mukkeklopper.player
 
 import android.app.PendingIntent
 import android.content.Intent
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
 import androidx.media3.cast.CastPlayer
 import androidx.media3.cast.SessionAvailabilityListener
+import androidx.media3.common.AudioAttributes
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
+import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.analytics.AnalyticsListener
 import androidx.media3.session.LibraryResult
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
@@ -30,6 +35,7 @@ import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.withContext
 
 /**
  * [MediaLibraryService] statt eines einfachen `MediaSessionService`, damit Android Auto einen
@@ -46,6 +52,7 @@ class MukkePlayerService : MediaLibraryService() {
     private var localMediaServer: LocalMediaServer? = null
     private val serviceScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val settingsRepository by lazy { SettingsRepository(applicationContext) }
+    private val audioManager by lazy { getSystemService(AUDIO_SERVICE) as AudioManager }
 
     /** Für Android Auto (Browse-Baum) und die "ganzer Ordner"-Wiedergabe beim Tippen im Auto. */
     @Volatile
@@ -53,8 +60,110 @@ class MukkePlayerService : MediaLibraryService() {
 
     private val audioSessionListener = object : Player.Listener {
         override fun onAudioSessionIdChanged(audioSessionId: Int) {
+            AppLog.i(TAG, "audio session id changed: $audioSessionId")
             EqualizerManager.attach(applicationContext, audioSessionId)
         }
+    }
+
+    /**
+     * Deckt die Pfade ab, die für "App zeigt Wiedergabe, aber kein Ton" relevant sind:
+     * Player-Fehler, Audiofokus-Verlust (via [Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS]),
+     * Playback-State-/Volume-/AudioAttributes-Wechsel. Fehler/Fokus-Verlust immer sichtbar (i/w/e),
+     * der Rest nur bei aktiviertem Debug-Toggle (d) — siehe [AppLog].
+     */
+    private val diagnosticsListener = object : Player.Listener {
+        override fun onPlayerError(error: PlaybackException) {
+            AppLog.e(TAG, "player error: ${error.errorCodeName} (${error.errorCode})", error)
+        }
+
+        override fun onPlaybackStateChanged(playbackState: Int) {
+            AppLog.d(TAG, "playback state: ${playbackState.stateName()}")
+        }
+
+        override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+            val reasonName = reason.playWhenReadyReasonName()
+            if (reason == Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS) {
+                AppLog.w(TAG, "playWhenReady=$playWhenReady reason=$reasonName — Audiofokus verloren/verweigert")
+            } else {
+                AppLog.d(TAG, "playWhenReady=$playWhenReady reason=$reasonName")
+            }
+        }
+
+        override fun onIsPlayingChanged(isPlaying: Boolean) {
+            AppLog.d(TAG, "isPlaying=$isPlaying")
+            if (isPlaying) logAudioRoutingSnapshot()
+        }
+
+        override fun onAudioAttributesChanged(attributes: AudioAttributes) {
+            AppLog.d(TAG, "audio attributes: usage=${attributes.usage} contentType=${attributes.contentType}")
+        }
+
+        override fun onVolumeChanged(volume: Float) {
+            AppLog.d(TAG, "player volume=$volume")
+        }
+
+        override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+            AppLog.d(
+                TAG,
+                "media item transition: '${mediaItem?.mediaMetadata?.title}' reason=${reason.transitionReasonName()}"
+            )
+        }
+    }
+
+    private fun Int.stateName(): String = when (this) {
+        Player.STATE_IDLE -> "IDLE"
+        Player.STATE_BUFFERING -> "BUFFERING"
+        Player.STATE_READY -> "READY"
+        Player.STATE_ENDED -> "ENDED"
+        else -> "UNKNOWN($this)"
+    }
+
+    private fun Int.playWhenReadyReasonName(): String = when (this) {
+        Player.PLAY_WHEN_READY_CHANGE_REASON_USER_REQUEST -> "USER_REQUEST"
+        Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_FOCUS_LOSS -> "AUDIO_FOCUS_LOSS"
+        Player.PLAY_WHEN_READY_CHANGE_REASON_AUDIO_BECOMING_NOISY -> "AUDIO_BECOMING_NOISY"
+        Player.PLAY_WHEN_READY_CHANGE_REASON_REMOTE -> "REMOTE"
+        Player.PLAY_WHEN_READY_CHANGE_REASON_END_OF_MEDIA_ITEM -> "END_OF_MEDIA_ITEM"
+        Player.PLAY_WHEN_READY_CHANGE_REASON_SUPPRESSED_TOO_LONG -> "SUPPRESSED_TOO_LONG"
+        else -> "UNKNOWN($this)"
+    }
+
+    private fun Int.transitionReasonName(): String = when (this) {
+        Player.MEDIA_ITEM_TRANSITION_REASON_REPEAT -> "REPEAT"
+        Player.MEDIA_ITEM_TRANSITION_REASON_AUTO -> "AUTO"
+        Player.MEDIA_ITEM_TRANSITION_REASON_SEEK -> "SEEK"
+        Player.MEDIA_ITEM_TRANSITION_REASON_PLAYLIST_CHANGED -> "PLAYLIST_CHANGED"
+        else -> "UNKNOWN($this)"
+    }
+
+    /**
+     * Deckt genau die Lücke ab, die reine Player-Listener nicht zeigen können: "App sagt
+     * isPlaying=true, aber wohin geht der Ton wirklich" — z. B. wenn Wireless Android Auto
+     * die Steuerung über WLAN, den Audio-Stream aber weiterhin über eine separate
+     * Bluetooth-Verbindung führt, die getrennt scheitern kann.
+     */
+    private fun logAudioRoutingSnapshot() {
+        runCatching {
+            val outputs = audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS)
+                .joinToString { "${it.type.audioDeviceTypeName()}(id=${it.id})" }
+            AppLog.i(TAG, "audio routing snapshot: isMusicActive=${audioManager.isMusicActive} outputs=[$outputs]")
+        }.onFailure { AppLog.w(TAG, "failed to read audio routing snapshot", it) }
+    }
+
+    private fun Int.audioDeviceTypeName(): String = when (this) {
+        AudioDeviceInfo.TYPE_BUILTIN_SPEAKER -> "BUILTIN_SPEAKER"
+        AudioDeviceInfo.TYPE_WIRED_HEADSET -> "WIRED_HEADSET"
+        AudioDeviceInfo.TYPE_WIRED_HEADPHONES -> "WIRED_HEADPHONES"
+        AudioDeviceInfo.TYPE_BLUETOOTH_SCO -> "BLUETOOTH_SCO"
+        AudioDeviceInfo.TYPE_BLUETOOTH_A2DP -> "BLUETOOTH_A2DP"
+        AudioDeviceInfo.TYPE_USB_DEVICE -> "USB_DEVICE"
+        AudioDeviceInfo.TYPE_USB_ACCESSORY -> "USB_ACCESSORY"
+        AudioDeviceInfo.TYPE_USB_HEADSET -> "USB_HEADSET"
+        AudioDeviceInfo.TYPE_DOCK -> "DOCK"
+        AudioDeviceInfo.TYPE_BUS -> "BUS"
+        AudioDeviceInfo.TYPE_HDMI -> "HDMI"
+        AudioDeviceInfo.TYPE_TELEPHONY -> "TELEPHONY"
+        else -> "TYPE($this)"
     }
 
     /**
@@ -68,6 +177,30 @@ class MukkePlayerService : MediaLibraryService() {
 
         override fun onIsPlayingChanged(isPlaying: Boolean) {
             if (!isPlaying) savePlaybackStateAsync()
+        }
+    }
+
+    /**
+     * Tiefer als [Player.Listener]: reale Renderer-/Sink-Probleme, die trotz sauberem
+     * "isPlaying=true" auf Player-Ebene für Stille sorgen könnten (defekter/verzögerter
+     * AudioTrack, Codec-Fehler, Underruns).
+     */
+    private val analyticsListener = object : AnalyticsListener {
+        override fun onAudioSinkError(eventTime: AnalyticsListener.EventTime, audioSinkError: Exception) {
+            AppLog.e(TAG, "audio sink error", audioSinkError)
+        }
+
+        override fun onAudioCodecError(eventTime: AnalyticsListener.EventTime, audioCodecError: Exception) {
+            AppLog.e(TAG, "audio codec error", audioCodecError)
+        }
+
+        override fun onAudioUnderrun(
+            eventTime: AnalyticsListener.EventTime,
+            bufferSize: Int,
+            bufferSizeMs: Long,
+            elapsedSinceLastFeedMs: Long,
+        ) {
+            AppLog.w(TAG, "audio underrun: bufferSizeMs=$bufferSizeMs elapsedSinceLastFeedMs=$elapsedSinceLastFeedMs")
         }
     }
 
@@ -144,9 +277,12 @@ class MukkePlayerService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
+        AppLog.i(TAG, "onCreate")
         val player = ExoPlayer.Builder(this).build()
         player.addListener(audioSessionListener)
         player.addListener(persistenceListener)
+        player.addListener(diagnosticsListener)
+        player.addAnalyticsListener(analyticsListener)
         exoPlayer = player
         // Der Equalizer (Phase 9) braucht eine gültige Audio-Session; ExoPlayer legt sie
         // schon beim Start an, der Listener greift erst bei einem späteren Wechsel.
@@ -180,7 +316,7 @@ class MukkePlayerService : MediaLibraryService() {
 
     private fun refreshLibraryCache() {
         serviceScope.launch {
-            runCatching { MediaStoreRepository(applicationContext).loadTracks() }
+            runCatching { withContext(Dispatchers.IO) { MediaStoreRepository(applicationContext).loadTracks() } }
                 .onSuccess { libraryTracks = it; AppLog.d(TAG, "Android Auto library cache: ${it.size} tracks") }
                 .onFailure { AppLog.w(TAG, "Android Auto: failed to load library", it) }
         }
@@ -188,7 +324,7 @@ class MukkePlayerService : MediaLibraryService() {
 
     private suspend fun ensureLibraryLoaded(): List<Track> {
         if (libraryTracks.isEmpty()) {
-            libraryTracks = runCatching { MediaStoreRepository(applicationContext).loadTracks() }
+            libraryTracks = runCatching { withContext(Dispatchers.IO) { MediaStoreRepository(applicationContext).loadTracks() } }
                 .getOrDefault(emptyList())
         }
         return libraryTracks
@@ -196,12 +332,35 @@ class MukkePlayerService : MediaLibraryService() {
 
     private val librarySessionCallback = object : MediaLibraryService.MediaLibrarySession.Callback {
 
+        override fun onConnect(
+            session: MediaSession,
+            controller: MediaSession.ControllerInfo,
+        ): MediaSession.ConnectionResult {
+            AppLog.i(
+                TAG,
+                "controller connect: package=${controller.packageName} uid=${controller.uid} trusted=${controller.isTrusted}"
+            )
+            return super.onConnect(session, controller)
+        }
+
+        override fun onPostConnect(session: MediaSession, controller: MediaSession.ControllerInfo) {
+            AppLog.d(TAG, "controller post-connect: package=${controller.packageName}")
+            super.onPostConnect(session, controller)
+        }
+
+        override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
+            AppLog.i(TAG, "controller disconnected: package=${controller.packageName}")
+            super.onDisconnected(session, controller)
+        }
+
         override fun onGetLibraryRoot(
             session: MediaLibraryService.MediaLibrarySession,
             browser: MediaSession.ControllerInfo,
             params: MediaLibraryService.LibraryParams?,
-        ): ListenableFuture<LibraryResult<MediaItem>> =
-            Futures.immediateFuture(LibraryResult.ofItem(folderMediaItem(ROOT_ID, "MukkeKlopper"), params))
+        ): ListenableFuture<LibraryResult<MediaItem>> {
+            AppLog.d(TAG, "onGetLibraryRoot: browser=${browser.packageName}")
+            return Futures.immediateFuture(LibraryResult.ofItem(folderMediaItem(ROOT_ID, "MukkeKlopper"), params))
+        }
 
         override fun onGetChildren(
             session: MediaLibraryService.MediaLibrarySession,
@@ -211,6 +370,7 @@ class MukkePlayerService : MediaLibraryService() {
             pageSize: Int,
             params: MediaLibraryService.LibraryParams?,
         ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
+            AppLog.d(TAG, "onGetChildren: parentId='$parentId' browser=${browser.packageName}")
             val future = SettableFuture.create<LibraryResult<ImmutableList<MediaItem>>>()
             serviceScope.launch {
                 val tracks = ensureLibraryLoaded()
@@ -235,6 +395,7 @@ class MukkePlayerService : MediaLibraryService() {
             browser: MediaSession.ControllerInfo,
             mediaId: String,
         ): ListenableFuture<LibraryResult<MediaItem>> {
+            AppLog.d(TAG, "onGetItem: mediaId='$mediaId' browser=${browser.packageName}")
             val future = SettableFuture.create<LibraryResult<MediaItem>>()
             serviceScope.launch {
                 val tracks = ensureLibraryLoaded()
@@ -256,6 +417,7 @@ class MukkePlayerService : MediaLibraryService() {
             startIndex: Int,
             startPositionMs: Long,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            AppLog.d(TAG, "onSetMediaItems: ${mediaItems.size} item(s) from ${controller.packageName}, startIndex=$startIndex")
             val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
             serviceScope.launch {
                 val tracks = ensureLibraryLoaded()
@@ -274,6 +436,7 @@ class MukkePlayerService : MediaLibraryService() {
                         )
                     )
                 } else {
+                    AppLog.d(TAG, "onSetMediaItems: passthrough, no single track resolved")
                     val resolved = mediaItems.map { item ->
                         item.mediaId.toLongOrNull()?.let { id -> tracks.find { it.id == id } }
                             ?.let(::trackMediaItem) ?: item
@@ -289,12 +452,15 @@ class MukkePlayerService : MediaLibraryService() {
             mediaSession: MediaSession,
             controller: MediaSession.ControllerInfo,
         ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
+            AppLog.i(TAG, "onPlaybackResumption requested by ${controller.packageName}")
             val future = SettableFuture.create<MediaSession.MediaItemsWithStartPosition>()
             serviceScope.launch {
                 val restored = runCatching { restoredQueue() }.getOrNull()
                 if (restored != null) {
+                    AppLog.i(TAG, "onPlaybackResumption: restored ${restored.mediaItems.size} items, index=${restored.startIndex}")
                     future.set(restored)
                 } else {
+                    AppLog.w(TAG, "onPlaybackResumption: nothing to resume")
                     future.setException(IllegalStateException("No playback state to resume"))
                 }
             }
@@ -340,6 +506,7 @@ class MukkePlayerService : MediaLibraryService() {
             val player = CastPlayer(castContext, CastMediaItemConverter(this, server))
             player.setSessionAvailabilityListener(castSessionListener)
             castPlayer = player
+            AppLog.d(TAG, "setUpCastPlayer: isCastSessionAvailable=${player.isCastSessionAvailable}")
             if (player.isCastSessionAvailable) {
                 startLocalMediaServer()
                 exoPlayer?.let { exo -> transferPlayback(from = exo, to = player) }
@@ -372,10 +539,18 @@ class MukkePlayerService : MediaLibraryService() {
         AppLog.i(TAG, "LocalMediaServer stopped")
     }
 
-    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibraryService.MediaLibrarySession? =
-        mediaSession
+    override fun onGetSession(controllerInfo: MediaSession.ControllerInfo): MediaLibraryService.MediaLibrarySession? {
+        AppLog.d(TAG, "onGetSession: package=${controllerInfo.packageName}")
+        return mediaSession
+    }
+
+    override fun onTaskRemoved(rootIntent: Intent?) {
+        AppLog.i(TAG, "onTaskRemoved")
+        super.onTaskRemoved(rootIntent)
+    }
 
     override fun onDestroy() {
+        AppLog.i(TAG, "onDestroy")
         // Letzten Stand sichern, bevor Scope und Player freigegeben werden — die
         // Listener-basierten Speicherpunkte decken einen Service-Kill nicht ab.
         currentPlaybackState()?.let { state ->

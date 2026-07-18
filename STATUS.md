@@ -1,6 +1,6 @@
 # MukkeKlopper — Projektstatus
 
-**Stand:** 2026-07-17  
+**Stand:** 2026-07-18  
 **App-ID:** `de.schliemannosaurusrex.mukkeklopper`  
 **Publisher:** SchliemannosaurusRex  
 
@@ -501,6 +501,65 @@ Build `assembleDebug` grün, Installation + Smoke-Test (Start, Library-Cache,
 EqualizerManager-Attach) am Pixel 8 Pro OK. Funktionale Geräteverifikation der
 einzelnen Findings: siehe „Offen".
 
+### Android Auto im echten Fahrzeug — kein Ton, Ursache gefunden (2026-07-18)
+
+**Symptom:** Im echten Fahrzeug (Pixel 8 Pro, sowohl Kabel als auch WLAN)
+zeigte MukkeKlopper über Android Auto Wiedergabe an (Play/Pause, Titelwechsel,
+Fortschritt), es war aber kein Ton zu hören.
+
+**Diagnose:** Umfangreiche Log-Erweiterung zur Eingrenzung
+(`MukkePlayerService`/`AppLog`, siehe unten) zeigte über mehrere Testläufe
+hinweg **durchgehend fehlerfreie Wiedergabe** auf App-Ebene: kein
+`onPlayerError`, kein `AUDIO_FOCUS_LOSS`, saubere `BUFFERING→READY`-Übergänge,
+`isMusicActive=true`, keine Audio-Sink-/Codec-Fehler oder Underruns — sowohl
+bei stummen als auch bei später hörbaren Versuchen identisch. Damit ist ein
+App-seitiger Bug ausgeschlossen.
+
+**Entscheidender Befund:** Beim Kabel-Test wurde derselbe, nie neu gestartete
+MukkeKlopper-Player hörbar, nachdem zwischenzeitlich eine andere Medien-App
+(Pulsar Pro) erfolgreich Ton abgespielt hatte — ohne jede Code-Beteiligung.
+Das deutet auf ein Audio-Routing-Aushandlungsproblem auf
+Fahrzeug-/Android-Auto-Ebene beim ersten Verbindungsaufbau hin: Der
+Audiokanal zum Auto wird offenbar erst „scharf", nachdem irgendeine App
+erfolgreich eine Audio-Session etabliert hat. MukkeKlopper spielt durch die
+Playback-Persistenz-Funktion automatisch sofort los und trifft dadurch
+öfter auf dieses Zeitfenster als Apps, die der Nutzer erst manuell startet.
+
+**Fazit:** Kein MukkeKlopper-Bug — Ursache liegt außerhalb der App-Kontrolle.
+**Workaround:** Bleibt es beim Verbinden stumm, kurz zu einer anderen
+Medien-App wechseln und zurück.
+
+**Kein Fix im Code umgesetzt** — ein spekulativer Delay/Audiofokus-Kick vor
+dem Auto-Resume wurde erwogen, aber verworfen: Beim WLAN-Testlauf blieb es
+auch über mehrere Minuten und mehrere echte manuelle Tap-Versuche hinweg
+stumm, reines Zeitvergehen behebt es also nicht zuverlässig — nur der
+Wechsel zu einer fremden App half nachweislich.
+
+**Neue Diagnose-Logik (bleibt im Code, unabhängig vom Befund nützlich):**
+- `AppLog` schreibt jetzt zusätzlich zum In-Memory-Ringpuffer nach
+  `filesDir/debug_log.txt` (persistiert über Prozess-/Service-Neustarts
+  hinweg, auslesbar auch ohne offene App-UI via
+  `adb shell run-as de.schliemannosaurusrex.mukkeklopper cat files/debug_log.txt`)
+- `MukkePlayerService`: `Player.Listener` erweitert um Fehler-, Playback-State-,
+  Audiofokus-Grund- und Media-Item-Transition-Logging; `AnalyticsListener`
+  für Audio-Sink-/Codec-Fehler und Underruns; Audio-Routing-Snapshot
+  (`AudioManager`-Ausgabegeräte + `isMusicActive`) bei jedem Wiedergabestart;
+  `MediaLibrarySession.Callback` protokolliert Controller-Connect/-Disconnect
+  und alle Browse-/Resumption-Aufrufe mit Paketnamen
+- `EqualizerManager.applyToEffects`: bisher stillschweigend verschluckte
+  `runCatching`-Fehler werden jetzt geloggt
+- `MediaStoreRepository`-Ladevorgänge (`refreshLibraryCache`/
+  `ensureLibraryLoaded`) laufen jetzt auf `Dispatchers.IO` statt den
+  Single-Thread-`Dispatchers.Main.immediate`-Scope zu blockieren (Google
+  App/Assistant scannt bei jedem Connect den kompletten Ordnerbaum, das
+  blockierte zuvor kurzzeitig andere MediaSession-Kommandos)
+- Geprüft und verworfen: `AudioPlaybackConfiguration.isMuted()` wäre das
+  passende Signal gewesen, ist aber nicht Teil des öffentlichen SDK für
+  Drittanbieter-Apps (Compiler-Fehler bestätigt) — kein Weg, System-seitiges
+  Stummschalten aus der App heraus zu erkennen.
+
+Ausführlicher Testablauf und Rohdaten: [`docs/car-test-plan.md`](docs/car-test-plan.md).
+
 ---
 
 ## Offen 🔲
@@ -512,7 +571,8 @@ einzelnen Findings: siehe „Offen".
 - Cast-Übernahme des laufenden Titels auf Google Home Mini
 - Equalizer-Export/Import (v2-Datei) inkl. Live-Anwendung
 - Letzter Titel nach App-Neustart im Player-Tab
-- Android-Auto-Einstieg im Startordner (DHU oder Fahrzeug)
+- Android-Auto-Einstieg im Startordner — **erledigt** (echtes Fahrzeug,
+  2026-07-18, siehe Abschnitt „Android Auto im echten Fahrzeug" oben)
 
 ### Geräteverifikation Phase 8 & Emulator-Grenzen
 
@@ -552,7 +612,9 @@ Ordnern/Trackzahlen).
   Server wiederholt (finale Ursachenklärung Server-Config vs. falsches
   Passwort steht aus)
 - Android-Auto-Browse-Baum per Desktop Head Unit (DHU) verifiziert (s.
-  Android-Auto-Abschnitt oben) — Test im echten Fahrzeug steht noch aus
+  Android-Auto-Abschnitt oben) — Test im echten Fahrzeug **erledigt**
+  (2026-07-18): kein Ton war ein Fahrzeug-/Android-Auto-seitiges
+  Audio-Routing-Problem, kein MukkeKlopper-Bug (siehe Abschnitt oben)
 
 ### Zurückgestellt ⏸
 

@@ -18,6 +18,10 @@ class MukkeKlopperApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        // Muss vor jedem anderen AppLog-Aufruf laufen, damit auch der allererste
+        // Eintrag dieses Prozesslaufs in die persistente Datei geschrieben wird
+        // (siehe AppLog — reines In-Memory hätte Prozess-Neustarts nicht überstanden).
+        AppLog.init(this)
         // Androids eingebauter "BC"-Provider ist beschnitten (u. a. kein X25519).
         // sshj fordert Algorithmen explizit beim Provider "BC" an — deshalb das
         // System-BC durch das volle BouncyCastle aus den Dependencies ersetzen,
